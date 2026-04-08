@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shadow Pillars</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #0a0a0f; cursor: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0f);
+// scene.fog removed — was hiding shadows
+
+// --- Procedural stone textures ---
+function createStoneFloorTexture() {
+  const size = 512;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const x = c.getContext('2d');
+
+  // Smooth stone base
+  x.fillStyle = '#1e1e22';
+  x.fillRect(0, 0, size, size);
+
+  // Subtle noise — natural stone grain
+  for (let i = 0; i < 4000; i++) {
+    const v = Math.floor(Math.random() * 20) - 10;
+    const base = 54 + v;
+    x.fillStyle = `rgba(${base}, ${base - 2}, ${base + 2}, 0.08)`;
+    x.fillRect(Math.random() * size, Math.random() * size, 1 + Math.random() * 3, 1 + Math.random() * 2);
+  }
+
+  // Larger blotchy variation — weathered stone look
+  for (let i = 0; i < 40; i++) {
+    const v = Math.random() > 0.5 ? 12 : -8;
+    const base = 54 + v;
+    x.fillStyle = `rgba(${base}, ${base - 2}, ${base + 3}, 0.06)`;
+    x.beginPath();
+    x.arc(Math.random() * size, Math.random() * size, 10 + Math.random() * 30, 0, Math.PI * 2);
+    x.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(10, 10);
+  return tex;
+}
+
+function createStonePillarTexture() {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const x = c.getContext('2d');
+
+  // Base
+  x.fillStyle = '#3a3a40';
+  x.fillRect(0, 0, size, size);
+
+  // Large stone blocks
+  const blockH = 42;
+  for (let row = 0; row < size / blockH + 1; row++) {
+    const by = row * blockH;
+    const offset = (row % 2) * (size / 2);
+    for (let col = -1; col < 3; col++) {
+      const bx = col * (size / 2) + offset;
+      const v = Math.floor(Math.random() * 18);
+      x.fillStyle = `rgb(${50 + v}, ${48 + v}, ${54 + v})`;
+      x.fillRect(bx + 1, by + 1, size / 2 - 2, blockH - 2);
+
+      // Cracks and wear
+      for (let s = 0; s < 20; s++) {
+        const sv = Math.random() > 0.5 ? 1 : -1;
+        x.fillStyle = `rgba(${sv > 0 ? 80 : 20}, ${sv > 0 ? 78 : 18}, ${sv > 0 ? 85 : 22}, 0.15)`;
+        x.fillRect(bx + Math.random() * (size / 2), by + Math.random() * blockH, 1 + Math.random() * 3, 1 + Math.random() * 3);
+      }
+    }
+    // Mortar
+    x.fillStyle = '#222226';
+    x.fillRect(0, by, size, 2);
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 3);
+  return tex;
+}
+
+function createStoneTopTexture() {
+  const size = 128;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const x = c.getContext('2d');
+  x.fillStyle = '#444448';
+  x.fillRect(0, 0, size, size);
+  // Worn surface noise
+  for (let i = 0; i < 300; i++) {
+    const v = Math.floor(Math.random() * 30);
+    x.fillStyle = `rgba(${60 + v}, ${58 + v}, ${65 + v}, 0.3)`;
+    x.fillRect(Math.random() * size, Math.random() * size, 2 + Math.random() * 4, 2 + Math.random() * 4);
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+const floorTex = createStoneFloorTexture();
+const pillarSideTex = createStonePillarTexture();
+const pillarTopTex = createStoneTopTexture();
+
+// Perspective camera top-down — wide FOV creates globe/fisheye distortion
+// showing pillar sides near screen edges
+const camera = new THREE.PerspectiveCamera(
+  90, window.innerWidth / window.innerHeight, 0.1, 200
+);
+camera.position.set(0, 35, 0);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// Ground plane — massive for infinite feel
+const groundGeo = new THREE.PlaneGeometry(2000, 2000);
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  roughness: 0.9,
+  metalness: 0
+});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Pillar materials — stone sides + worn top
+const pillarSideMat = new THREE.MeshStandardMaterial({
+  map: pillarSideTex,
+  roughness: 0.9,
+  metalness: 0.05
+});
+const pillarTopMat = new THREE.MeshStandardMaterial({
+  map: pillarTopTex,
+  roughness: 0.95,
+  metalness: 0.05
+});
+const pillarMats = [
+  pillarSideMat, pillarSideMat,
+  pillarTopMat, pillarSideMat,
+  pillarSideMat, pillarSideMat
+];
+
+// Square pillars in a uniform grid — tall so light sits inside the "walls"
+const pillars = [];
+const spacing = 10;
+const gridSize = 20;
+const pillarSize = 2.4;
+const pillarHeight = 20;
+const lightHeight = 1; // close to ground, matching wisp visual
+
+for (let ix = -gridSize; ix <= gridSize; ix++) {
+  for (let iz = -gridSize; iz <= gridSize; iz++) {
+    const geo = new THREE.BoxGeometry(pillarSize, pillarHeight, pillarSize);
+    const pillar = new THREE.Mesh(geo, pillarMats);
+    pillar.position.set(ix * spacing, pillarHeight / 2, iz * spacing);
+    pillar.castShadow = true;
+    pillar.receiveShadow = true;
+    scene.add(pillar);
+    pillars.push(pillar);
+  }
+}
+
+// Cursor point light
+const cursorLight = new THREE.PointLight(0x88bbff, 15, 100, 1.5);
+cursorLight.position.set(0, lightHeight, 0);
+cursorLight.castShadow = true;
+cursorLight.shadow.mapSize.width = 2048;
+cursorLight.shadow.mapSize.height = 2048;
+cursorLight.shadow.radius = 6;
+cursorLight.shadow.bias = -0.002;
+cursorLight.shadow.camera.near = 0.5;
+cursorLight.shadow.camera.far = 80;
+scene.add(cursorLight);
+
+// --- Wisp with stretched trail ---
+
+// Glow texture
+const glowCanvas = document.createElement('canvas');
+glowCanvas.width = 64;
+glowCanvas.height = 64;
+const ctx = glowCanvas.getContext('2d');
+const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+gradient.addColorStop(0, 'rgba(180, 210, 255, 1)');
+gradient.addColorStop(0.3, 'rgba(130, 180, 255, 0.6)');
+gradient.addColorStop(0.7, 'rgba(80, 140, 255, 0.15)');
+gradient.addColorStop(1, 'rgba(60, 120, 255, 0)');
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, 64, 64);
+const glowTexture = new THREE.CanvasTexture(glowCanvas);
+
+// Core wisp sprite
+const wispCoreMat = new THREE.SpriteMaterial({
+  map: glowTexture,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending
+});
+const wispCore = new THREE.Sprite(wispCoreMat);
+wispCore.scale.set(2.5, 2.5, 1);
+scene.add(wispCore);
+
+// Stretch trail — a tapered mesh that elongates opposite to movement
+const trailSegments = 12;
+const trailGeo = new THREE.BufferGeometry();
+const trailVerts = new Float32Array((trailSegments + 1) * 2 * 3);
+const trailUVs = new Float32Array((trailSegments + 1) * 2 * 2);
+const trailIndices = [];
+for (let i = 0; i < trailSegments; i++) {
+  const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+  trailIndices.push(a, c, b, b, c, d);
+}
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailVerts, 3));
+trailGeo.setAttribute('uv', new THREE.BufferAttribute(trailUVs, 2));
+trailGeo.setIndex(trailIndices);
+
+// Trail texture — vertical fade
+const trailTexCanvas = document.createElement('canvas');
+trailTexCanvas.width = 32;
+trailTexCanvas.height = 128;
+const tctx = trailTexCanvas.getContext('2d');
+const tgrad = tctx.createLinearGradient(0, 0, 0, 128);
+tgrad.addColorStop(0, 'rgba(160, 200, 255, 0.5)');
+tgrad.addColorStop(0.3, 'rgba(120, 170, 255, 0.2)');
+tgrad.addColorStop(1, 'rgba(80, 140, 255, 0)');
+tctx.fillStyle = tgrad;
+tctx.fillRect(0, 0, 32, 128);
+const trailTexture = new THREE.CanvasTexture(trailTexCanvas);
+
+const trailMat = new THREE.MeshBasicMaterial({
+  map: trailTexture,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide
+});
+const trailMesh = new THREE.Mesh(trailGeo, trailMat);
+scene.add(trailMesh);
+
+// History of positions for smooth trail
+const posHistory = [];
+const historyLen = trailSegments + 1;
+for (let i = 0; i < historyLen; i++) {
+  posHistory.push(new THREE.Vector3(spacing / 2, 0.4, spacing / 2));
+}
+
+
+// Ambient light — keeps pillars visible even far from cursor
+const ambient = new THREE.AmbientLight(0x666688, 0.4);
+scene.add(ambient);
+
+// Mouse tracking
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+window.addEventListener('mousemove', (e) => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const target = new THREE.Vector3();
+const lightPos = { x: spacing / 2, z: spacing / 2 }; // start between pillars
+
+// Edge panning
+const panSpeed = 30;
+const edgeZone = 0.15; // 15% from edge triggers pan
+const camOffset = { x: 0, z: 0 }; // camera pan offset
+const rawMouse = { x: 0, y: 0 }; // raw 0-1 mouse coords
+
+window.addEventListener('mousemove', (e) => {
+  rawMouse.x = e.clientX / window.innerWidth;
+  rawMouse.y = e.clientY / window.innerHeight;
+});
+
+const halfPillar = pillarSize / 2;
+const collisionPad = 0.2;
+
+function isInsidePillar(x, z) {
+  for (const p of pillars) {
+    if (
+      x > p.position.x - halfPillar - collisionPad &&
+      x < p.position.x + halfPillar + collisionPad &&
+      z > p.position.z - halfPillar - collisionPad &&
+      z < p.position.z + halfPillar + collisionPad
+    ) return true;
+  }
+  return false;
+}
+
+function moveWithCollision(fromX, fromZ, toX, toZ) {
+  const dx = toX - fromX;
+  const dz = toZ - fromZ;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  // Step in small increments so we never skip over a pillar
+  const stepSize = 0.3;
+  const steps = Math.max(1, Math.ceil(dist / stepSize));
+
+  let cx = fromX;
+  let cz = fromZ;
+
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const nx = fromX + dx * t;
+    const nz = fromZ + dz * t;
+
+    // Try both axes
+    if (!isInsidePillar(nx, nz)) {
+      cx = nx;
+      cz = nz;
+      continue;
+    }
+
+    // Try sliding on each axis
+    const canX = !isInsidePillar(nx, cz);
+    const canZ = !isInsidePillar(cx, nz);
+
+    if (canX) { cx = nx; }
+    if (canZ) { cz = nz; }
+
+    // If neither axis works, stop — we've hit a wall
+    if (!canX && !canZ) break;
+  }
+
+  return { x: cx, z: cz };
+}
+
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = clock.getDelta() || 0.016;
+
+  // Edge panning
+  let panX = 0, panZ = 0;
+  if (rawMouse.x < edgeZone) panX = -(1 - rawMouse.x / edgeZone);
+  else if (rawMouse.x > 1 - edgeZone) panX = (rawMouse.x - (1 - edgeZone)) / edgeZone;
+  if (rawMouse.y < edgeZone) panZ = -(1 - rawMouse.y / edgeZone);
+  else if (rawMouse.y > 1 - edgeZone) panZ = (rawMouse.y - (1 - edgeZone)) / edgeZone;
+
+  camOffset.x += panX * panSpeed * dt;
+  camOffset.z += panZ * panSpeed * dt;
+
+  camera.position.set(camOffset.x, 35, camOffset.z);
+  camera.lookAt(camOffset.x, 0, camOffset.z);
+
+  raycaster.setFromCamera(mouse, camera);
+  raycaster.ray.intersectPlane(groundPlane, target);
+
+  if (target) {
+    const resolved = moveWithCollision(lightPos.x, lightPos.z, target.x, target.z);
+    lightPos.x = resolved.x;
+    lightPos.z = resolved.z;
+
+    // Bob/float offset
+    const bobY = Math.sin(t * 3) * 0.15 + Math.sin(t * 7.3) * 0.05;
+    const wispY = 0.4 + bobY;
+
+    // Flickering intensity
+    const flicker = 0.85 + Math.sin(t * 12) * 0.1 + Math.sin(t * 27.7) * 0.05;
+    cursorLight.intensity = 15 * flicker;
+    cursorLight.position.set(lightPos.x, lightHeight, lightPos.z);
+
+    // Core wisp
+    wispCore.position.set(lightPos.x, wispY, lightPos.z);
+    wispCore.material.opacity = 0.7 + Math.sin(t * 10) * 0.15;
+    const coreScale = 2.2 + Math.sin(t * 5) * 0.3;
+    wispCore.scale.set(coreScale, coreScale, 1);
+
+    // Shift position history — smooth trail behind wisp
+    for (let i = historyLen - 1; i > 0; i--) {
+      posHistory[i].lerp(posHistory[i - 1], 0.7);
+    }
+    posHistory[0].set(lightPos.x, wispY, lightPos.z);
+
+    // Build trail mesh vertices — ribbon facing camera
+    const pos = trailGeo.getAttribute('position');
+    const uv = trailGeo.getAttribute('uv');
+    for (let i = 0; i < historyLen; i++) {
+      const p = posHistory[i];
+      const taper = 1 - (i / (historyLen - 1));
+      const width = taper * 1.2;
+
+      // Perpendicular to trail direction (in XZ), facing up for top-down
+      let dx = 0, dz = 1;
+      if (i < historyLen - 1) {
+        dx = posHistory[i].x - posHistory[i + 1].x;
+        dz = posHistory[i].z - posHistory[i + 1].z;
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        dx /= len; dz /= len;
+      }
+      // Perpendicular
+      const px = -dz * width;
+      const pz = dx * width;
+
+      const idx = i * 2;
+      pos.setXYZ(idx, p.x + px, p.y, p.z + pz);
+      pos.setXYZ(idx + 1, p.x - px, p.y, p.z - pz);
+      uv.setXY(idx, 0, i / (historyLen - 1));
+      uv.setXY(idx + 1, 1, i / (historyLen - 1));
+    }
+    pos.needsUpdate = true;
+    uv.needsUpdate = true;
+
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>
