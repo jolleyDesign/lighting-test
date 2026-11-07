@@ -370,11 +370,20 @@ function animate() {
   camOffset.x += panX * panSpeed * dt;
   camOffset.z += panZ * panSpeed * dt;
 
+  // Clamp camera so we stop before the grid edge
+  const panLimit = (gridSize - 3) * spacing;
+  camOffset.x = Math.max(-panLimit, Math.min(panLimit, camOffset.x));
+  camOffset.z = Math.max(-panLimit, Math.min(panLimit, camOffset.z));
+
   camera.position.set(camOffset.x, 35, camOffset.z);
   camera.lookAt(camOffset.x, 0, camOffset.z);
 
   raycaster.setFromCamera(mouse, camera);
   raycaster.ray.intersectPlane(groundPlane, target);
+
+  // Move wisp along with camera pan so it doesn't get left behind
+  lightPos.x += panX * panSpeed * dt;
+  lightPos.z += panZ * panSpeed * dt;
 
   if (target) {
     const resolved = moveWithCollision(lightPos.x, lightPos.z, target.x, target.z);
